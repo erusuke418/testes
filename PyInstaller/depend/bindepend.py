@@ -757,21 +757,21 @@ def _library_matcher(name):
 
 def get_python_library_path():
     """
-    Find dynamic Python library that will be bundled with frozen executable.
-
-    NOTE: This is a fallback option when the Python executable is likely statically linked with the Python library and
-          we need to search more for it. For example, this is the case on Debian/Ubuntu.
+    Find Python shared library that belongs to the current interpreter.
 
     Return  full path to Python dynamic library or None when not found.
 
-    We need to know name of the Python dynamic library for the bootloader. Bootloader has to know what library to
-    load and not try to guess.
+    PyInstaller needs to collect the Python shared library, so that bootloader can load it, import Python C API
+    symbols, and use them to set up the embedded Python interpreter.
 
-    Some linux distributions (e.g. debian-based) statically link the Python executable to the libpython,
-    so bindepend does not include it in its output. In this situation let's try to find it.
+    The name of the shared library is typically fixed (`python3.X.dll` on Windows, libpython3.X.so on Unix systems,
+    and `libpython3.X.dylib` on macOS for shared library builds and `Python.framework/Python` for framework build).
+    Its location can usually be inferred from the Python interpreter executable, when the latter is dynamically
+    linked against the shared library.
 
-    Custom Mac OS builds could possibly also have non-framework style libraries, so this method also checks for that
-    variant as well.
+    However, some situations require extra handling due to various quirks; for example, debian-based some linux
+    distributions statically link the Python interpreter executable against the Python library, while also providing
+    a shared library variant for external users.
     """
     def _find_lib_in_libdirs(*libdirs):
         for libdir in libdirs:
@@ -806,42 +806,30 @@ def get_python_library_path():
                 # Python library found. Return absolute path to it.
                 return lib_path
 
-    # Python library NOT found. Resume searching using alternative methods.
-
-    # Work around for python venv having VERSION.dll rather than pythonXY.dll
+    # Work around for Python venv having VERSION.dll rather than pythonXY.dll
     if compat.is_win and any([os.path.normcase(lib_name) == 'version.dll' for lib_name, _ in imported_libraries]):
         pydll = 'python%d%d.dll' % sys.version_info[:2]
         return resolve_library_path(pydll, [os.path.dirname(compat.python_executable)])
 
-    # Applies only to non Windows platforms and conda.
+    # Search the `sys.base_prefix` and `lib` directory in `sys.base_prefix`.
+    # This covers various Python installations in case we fail to infer the shared library location for whatever reason;
+    # Anaconda Python, `uv` and `rye` Python, etc.
+    python_libname = _find_lib_in_libdirs(
+        compat.base_prefix,
+        os.path.join(compat.base_prefix, 'lib'),
+    )
+    if python_libname:
+        return python_libname
 
-    if compat.is_conda:
-        # Conda needs to be the first here since it overrules the operating system specific paths.
-        python_libname = _find_lib_in_libdirs(os.path.join(compat.base_prefix, 'lib'))
-        if python_libname:
-            return python_libname
-
-    elif compat.is_unix:
+    # On Unix-like systems, perform search in the configured library search locations. This should be done after
+    # exhausting all other options; it primarily caters to debian-packaged Python, but we need to make sure that we do
+    # not collect shared library from system-installed Python when the current interpreter is in fact some other Python
+    # build (for example, `uv` or `rye` Python of the same version as system-installed Python).
+    if compat.is_unix:
         for name in compat.PYDYLIB_NAMES:
-            python_libname = findLibrary(name)
+            python_libname = resolve_library_path(name)
             if python_libname:
                 return python_libname
-
-    if compat.is_darwin or compat.is_linux:
-        # On MacPython, Analysis.assemble is able to find the libpython with no additional help, asking for
-        # sys.executable dependencies. However, this fails on system python, because the shared library is not listed as
-        # a dependency of the binary (most probably it is opened at runtime using some dlopen trickery). This happens on
-        # Mac OS when Python is compiled as Framework.
-        # Linux using pyenv is similarly linked so that sys.executable dependencies does not yield libpython.so.
-
-        # Python compiled as Framework contains same values in sys.prefix and exec_prefix. That is why we can use just
-        # sys.prefix. In virtualenv, PyInstaller is not able to find Python library. We need special care for this case.
-        python_libname = _find_lib_in_libdirs(
-            compat.base_prefix,
-            os.path.join(compat.base_prefix, 'lib'),
-        )
-        if python_libname:
-            return python_libname
 
     # Python library NOT found. Return None and let the caller deal with this.
     return None

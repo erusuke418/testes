@@ -1,0 +1,3 @@
+(Linux) Fix discovery and collection of Python shared library when using
+``uv``-installed or ``rye``-installed Python that happens to be of same
+version as the system-installed Python.
