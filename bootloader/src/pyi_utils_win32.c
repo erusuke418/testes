@@ -1102,8 +1102,8 @@ void pyi_win32_minimize_console()
 \**********************************************************************/
 /* Our last resort in ensuring that onefile application can clean up
  * its temporary directory... */
-void
-pyi_win32_force_unload_bundled_dlls(struct PYI_CONTEXT *pyi_ctx)
+static void
+_pyi_win32_force_unload_bundled_dlls(const struct PYI_CONTEXT *pyi_ctx)
 {
     HANDLE process_handle;
     HMODULE *loaded_dlls = NULL;
@@ -1196,6 +1196,36 @@ pyi_win32_force_unload_bundled_dlls(struct PYI_CONTEXT *pyi_ctx)
 
 cleanup:
     free(loaded_dlls);
+}
+
+int pyi_win32_mitigate_locked_temporary_directory(const struct PYI_CONTEXT *pyi_ctx)
+{
+    int status;
+
+    /* One reason for locked files in the temporary directory might be
+     * due to Tcl/Tk shared libs pulling in dependencies and failing to
+     * release them when they are unloaded. This happens in frozen
+     * applications that use splash screen, where Tcl/Tk needs to be
+     * loaded in the parent process of the onefile application.
+     *
+     * For example, tcl86.dll from mingw-w64-i686-tcl 8.6.12-3 (32-bit
+     * msys2/mingw32 environment) pulls in libgcc_s_dw2-1.dll and
+     * libwinpthread-1.dll, and does not unload them when it is unloaded.
+     * Similar situation was observed in 64-bit builds with UPX-processed
+     * Tcl/Tk DLLs, which leak VCRUNTIME140.dll.
+     *
+     * So we go over DLLs loaded in the process, find the ones that
+     * originate from the application's temporary directory, and try
+     * to force-unload them, before repeating the directory removal
+     * attempt. Force-unloading DLLs is risky and might crash the process,
+     * but at this point, we have nothing left to lose... */
+    PYI_DEBUG_W(L"LOADER: trying to force unload bundled DLLs from this process...\n");
+    _pyi_win32_force_unload_bundled_dlls(pyi_ctx);
+
+    PYI_DEBUG_W(L"LOADER: trying to remove temporary directory again...\n");
+    status = pyi_recursive_rmdir(pyi_ctx->application_home_dir);
+
+    return status;
 }
 
 

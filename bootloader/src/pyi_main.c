@@ -901,28 +901,17 @@ int pyi_main_onefile_parent_cleanup(struct PYI_CONTEXT *pyi_ctx)
 
 #ifdef _WIN32
     /* On Windows, we might fail to remove temporary directory due to
-     * locked file. This might be due to snafu in the application code
-     * (for example, the applicaton code spawned another subprocess that
-     * is still alive and keeping files open), but it might also be
-     * due to Tcl/Tk shared libs pulling in dependencies and failing to
-     * release them when they are unloaded.
-     *
-     * For example, tcl86.dll from mingw-w64-i686-tcl 8.6.12-3 (32-bit
-     * msys2/mingw32 environment) pulls in libgcc_s_dw2-1.dll and
-     * libwinpthread-1.dll, and does not unload them when it is unloaded.
-     * Similar situation was observed in 64-bit builds with UPX-processed
-     * Tcl/Tk DLLs, which leak VCRUNTIME140.dll.
-     *
-     * So we go over DLLs loaded in the process, find the ones that
-     * originate from the application's temporary directory, and try
-     * to force-unload them, before repeating the directory removal
-     * attempt. Force-unloading DLLs is risky and might crash the process,
-     * but at this point, we have nothing left to lose... */
+     * locked file(s), which might happen due to various reasons. Try
+     * to mitigate (some of) them and attempt to remove the temporary
+     * directory again. */
     if (cleanup_status < 0) {
-        PYI_DEBUG_W(L"LOADER: failed to remove temporary directory - trying to force unload DLLs...\n");
-        pyi_win32_force_unload_bundled_dlls(pyi_ctx);
-        PYI_DEBUG_W(L"LOADER: trying to remove temporary directory again...\n");
-        cleanup_status = pyi_recursive_rmdir(pyi_ctx->application_home_dir);
+        PYI_DEBUG_W(L"LOADER: failed to remove temporary directory - attempting to mitigate the situation...\n");
+        cleanup_status = pyi_win32_mitigate_locked_temporary_directory(pyi_ctx);
+        if (cleanup_status == 0) {
+            PYI_DEBUG_W(L"LOADER: mitigation succeeded.\n");
+        } else {
+            PYI_DEBUG_W(L"LOADER: mitigation failed!\n");
+        }
     }
 #endif
 
@@ -935,6 +924,8 @@ int pyi_main_onefile_parent_cleanup(struct PYI_CONTEXT *pyi_ctx)
         } else {
             PYI_WARNING("Failed to remove temporary directory: %s\n", pyi_ctx->application_home_dir);
         }
+    } else {
+        PYI_DEBUG("LOADER: temporary directory %s was successfully removed.\n", pyi_ctx->application_home_dir);
     }
 
     /* Clean up the archive structure */

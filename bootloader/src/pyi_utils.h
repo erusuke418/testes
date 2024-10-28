@@ -75,9 +75,9 @@ void pyi_win32_hide_console();
 void pyi_win32_minimize_console();
 #endif
 
-/* Force-unload of bundled DLLs from onefile parent process (Windows only) */
+/* Attempt to mitigate locked files in temporary directory that prevent its removal. */
 #if defined(_WIN32)
-void pyi_win32_force_unload_bundled_dlls(struct PYI_CONTEXT *pyi_ctx);
+int pyi_win32_mitigate_locked_temporary_directory(const struct PYI_CONTEXT *pyi_ctx);
 #endif
 
 /* Windows low-level helpers */
