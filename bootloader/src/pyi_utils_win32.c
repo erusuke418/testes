@@ -1102,7 +1102,7 @@ void pyi_win32_minimize_console()
 \**********************************************************************/
 /* Our last resort in ensuring that onefile application can clean up
  * its temporary directory... */
-static void
+static int
 _pyi_win32_force_unload_bundled_dlls(const struct PYI_CONTEXT *pyi_ctx)
 {
     HANDLE process_handle;
@@ -1110,6 +1110,7 @@ _pyi_win32_force_unload_bundled_dlls(const struct PYI_CONTEXT *pyi_ctx)
     DWORD loaded_dlls_size = 0;
     int num_dlls;
     int num_problematic_dlls;
+    int num_unloaded_dlls = 0;
     wchar_t dll_filename[PYI_PATH_MAX];
     wchar_t application_home_dir[PYI_PATH_MAX];
     size_t application_home_dir_len;
@@ -1119,16 +1120,16 @@ _pyi_win32_force_unload_bundled_dlls(const struct PYI_CONTEXT *pyi_ctx)
 
     /* Query the required size for lpModules */
     if (EnumProcessModules(process_handle, loaded_dlls, 0, &loaded_dlls_size) == 0) {
-        return;
+        return 0; /* Technically an error, but treat it as if no DLLs were unloaded. */
     }
     if (loaded_dlls_size <= 0) {
-        return;
+        return 0;
     }
 
     /* Allocate the array */
     loaded_dlls = calloc(loaded_dlls_size, 1);
     if (!loaded_dlls) {
-        return;
+        return 0;
     }
 
     /* Read the loaded DLLs handles into array */
@@ -1180,10 +1181,11 @@ _pyi_win32_force_unload_bundled_dlls(const struct PYI_CONTEXT *pyi_ctx)
         /* Keep calling FreeLibrary() until it fails - which hopefully
          * means that the offending DLL is gone for good. */
         while (1) {
-            PYI_DEBUG_W(L"LOADER: forcing unload of %ls\n", dll_filename);
             num_attempts++;
+            PYI_DEBUG_W(L"LOADER: forcing unload of %ls (attempt #%d)\n", dll_filename, num_attempts);
             if (FreeLibrary(loaded_dlls[i]) == 0) {
                 PYI_DEBUG_W(L"LOADER: DLL unloaded after %d attempt(s)!\n", num_attempts);
+                num_unloaded_dlls++;
                 break;
             }
             /* Make sure we don't loop forever, just in case. */
@@ -1196,11 +1198,14 @@ _pyi_win32_force_unload_bundled_dlls(const struct PYI_CONTEXT *pyi_ctx)
 
 cleanup:
     free(loaded_dlls);
+
+    return num_unloaded_dlls;
 }
 
 int pyi_win32_mitigate_locked_temporary_directory(const struct PYI_CONTEXT *pyi_ctx)
 {
-    int status;
+    int num_unloaded_dlls;
+    int cleanup_status = -1;
 
     /* One reason for locked files in the temporary directory might be
      * due to Tcl/Tk shared libs pulling in dependencies and failing to
@@ -1212,20 +1217,31 @@ int pyi_win32_mitigate_locked_temporary_directory(const struct PYI_CONTEXT *pyi_
      * msys2/mingw32 environment) pulls in libgcc_s_dw2-1.dll and
      * libwinpthread-1.dll, and does not unload them when it is unloaded.
      * Similar situation was observed in 64-bit builds with UPX-processed
-     * Tcl/Tk DLLs, which leak VCRUNTIME140.dll.
+     * Tcl/Tk DLLs, which leak VCRUNTIME140.dll (although this is mitigated
+     * separately by pre-load of system copy, if available) and/or ZLIB1.dll.
      *
      * So we go over DLLs loaded in the process, find the ones that
      * originate from the application's temporary directory, and try
      * to force-unload them, before repeating the directory removal
      * attempt. Force-unloading DLLs is risky and might crash the process,
      * but at this point, we have nothing left to lose... */
-    PYI_DEBUG_W(L"LOADER: trying to force unload bundled DLLs from this process...\n");
-    _pyi_win32_force_unload_bundled_dlls(pyi_ctx);
+    PYI_DEBUG_W(L"LOADER: trying to force-unload bundled DLLs from this process...\n");
+    num_unloaded_dlls = _pyi_win32_force_unload_bundled_dlls(pyi_ctx);
+    if (num_unloaded_dlls > 0) {
+        PYI_DEBUG_W(L"LOADER: unloaded %d bundled DLL(s) from this process - trying to remove temporary directory again...\n", num_unloaded_dlls);
+        cleanup_status = pyi_recursive_rmdir(pyi_ctx->application_home_dir);
+        if (cleanup_status == 0) {
+            PYI_DEBUG_W(L"LOADER: removal succeeded.\n");
+            return 0;
+        } else {
+            PYI_DEBUG_W(L"LOADER: removal failed!\n");
+        }
+    } else {
+        PYI_DEBUG_W(L"LOADER: no bundled DLLs were unloaded from this process.\n");
+    }
 
-    PYI_DEBUG_W(L"LOADER: trying to remove temporary directory again...\n");
-    status = pyi_recursive_rmdir(pyi_ctx->application_home_dir);
-
-    return status;
+    /* Failed */
+    return -1;
 }
 
 
