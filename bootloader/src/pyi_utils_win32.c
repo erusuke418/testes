@@ -1207,6 +1207,10 @@ int pyi_win32_mitigate_locked_temporary_directory(const struct PYI_CONTEXT *pyi_
     int num_unloaded_dlls;
     int cleanup_status = -1;
 
+    const int max_attempts = 15; /* Maximum number of attempts in retry loop */
+    const int delay = 1000; /* Delay for retry loop (milliseconds) */
+    int attempt_count;
+
     /* One reason for locked files in the temporary directory might be
      * due to Tcl/Tk shared libs pulling in dependencies and failing to
      * release them when they are unloaded. This happens in frozen
@@ -1240,7 +1244,36 @@ int pyi_win32_mitigate_locked_temporary_directory(const struct PYI_CONTEXT *pyi_
         PYI_DEBUG_W(L"LOADER: no bundled DLLs were unloaded from this process.\n");
     }
 
-    /* Failed */
+    /* Sometimes, the spawned grandchild processes need a bit more time to
+     * completely finish; if their executable is part of the frozen
+     * application, it and its bundled dependencies will still be locked
+     * at this point. This seems to happen, for example, with the
+     * QtWebEngineProcess.exe helper when running a QtWebEngine-based
+     * application on a system with high CPU load.
+     *
+     * Other times, it might be Windows itself getting in our way; it seems
+     * that when running an x86_64 frozen application on an arm64 system,
+     * the OS ends up locking (some of?) the python extensions and DLLs
+     * for a short while; see #8837. The same issue has also been observed
+     * on x86_64; see #8866.
+     *
+     * The retry loop below attempts to address this. */
+    attempt_count = 0;
+    while (attempt_count++ < max_attempts) {
+        PYI_DEBUG_W(L"LOADER: waiting %d milliseconds before trying to remove temporary directory again...\n", delay);
+        Sleep(delay);
+        PYI_DEBUG_W(L"LOADER: trying to remove temporary directory (attempt %d / %d)...\n", attempt_count, max_attempts);
+        cleanup_status = pyi_recursive_rmdir(pyi_ctx->application_home_dir);
+        if (cleanup_status == 0) {
+            PYI_DEBUG_W(L"LOADER: removal succeeded.\n");
+            return 0;
+        } else {
+            PYI_DEBUG_W(L"LOADER: removal failed!\n");
+        }
+    }
+    PYI_DEBUG_W(L"LOADER: given up after %d attempts!\n", max_attempts);
+
+    /* Well, tough luck. */
     return -1;
 }
 

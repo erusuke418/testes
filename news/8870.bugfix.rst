@@ -1,0 +1,4 @@
+(Windows) Add a retry loop to ``onefile`` temporary directory cleanup
+as an attempt to mitigate situations when bundled DLLs and python
+extension modules remain locked by the OS and/or anti-virus program
+for a short while after the application process exits.
