@@ -1,0 +1,7 @@
+(Windows) Fix Qt run-time hooks failing to add the top-level application
+directory to ``PATH`` when the latter already contains a sub-directory
+of the top-level application directory (for example, ``pywin32_system32``
+sub-directory added to ``PATH`` by ``pywin32`` run-time hook). This
+failure prevented QtNetwork from discovering bundled OpenSSL DLLs, and 
+caused it to (attempt to) load them from other locations that happened
+to be in ``PATH``.
