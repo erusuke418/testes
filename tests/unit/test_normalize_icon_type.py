@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-import PyInstaller
 from PyInstaller.building.icon import normalize_icon_type
 
 
@@ -32,7 +31,7 @@ def test_normalize_icon(monkeypatch, tmp_path):
 
     # Native image - file path is passed through unchanged
 
-    icon = str(Path(PyInstaller.__file__).with_name("bootloader") / "images" / 'icon-console.ico')
+    icon = str(Path(__file__, "../../functional/data/set_icon/pyi_icon.ico").resolve())
     ret = normalize_icon_type(icon, ("ico",), "ico", workpath)
     if ret != icon:
         pytest.fail("icon validation changed path even though the format was correct already", False)

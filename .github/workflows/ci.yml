@@ -145,21 +145,24 @@ jobs:
             python waf --tests --target-arch=64bit-arm all
             ls ../PyInstaller/bootloader/Windows-64bit-arm
 
+      - name: Update pip
+        run: python -m pip install --upgrade pip setuptools wheel build
+
+      - name: Compile bootloader
+        run: cd bootloader && python waf --tests all
+
+      - name: Download dependencies
+        run: pip download --dest=dist .[completion] && rm -f dist/pyinstaller-*.whl
+        shell: bash
+
+      - name: Build wheels
+        run: sh release/build-wheels
+
       - name: Install PyInstaller
-        run: |
-          # Update pip.
-          python -m pip install --upgrade pip setuptools wheel
+        run: pip install --no-index --find-links=dist pyinstaller[completion]
 
-          # Compile bootloader
-          cd bootloader
-          python waf --tests all
-          cd ..
-
-          # Install PyInstaller.
-          pip install --progress-bar=off .[completion]
-
-          # Make sure the help options print.
-          python -m PyInstaller -h
+      - name: Check pyinstaller --help
+        run: python -m PyInstaller -h
 
       - name: Install test dependencies (base tools)
         run: |

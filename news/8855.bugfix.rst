@@ -1,0 +1,2 @@
+Fix macOS's default icons being missing from wheels (regression introduced in
+v6.11.0)

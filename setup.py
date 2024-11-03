@@ -102,7 +102,7 @@ class Wheel(bdist_wheel):
 
         if self.pyi_platform:
             if "Darwin" in self.pyi_platform:
-                icons = ["incs"]
+                icons = ["icns"]
             elif "Windows" in self.pyi_platform:
                 icons = ["ico"]
             else:
