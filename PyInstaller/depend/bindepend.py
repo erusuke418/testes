@@ -331,11 +331,19 @@ def _get_imports_ldd(filename, search_paths):
         #   'libpython2.7.so.1.0 => /usr/local/lib/libpython2.7.so.1.0'
         # Will not match the platform specific libs starting with '/platform'
         LDD_PATTERN = re.compile(r"^\s+(.*)\s+=>\s+(.*)$")
+    elif compat.is_linux:
+        # Match libs of the form
+        #   libpython3.13.so.1.0 => /home/brenainn/.pyenv/versions/3.13.0/lib/libpython3.13.so.1.0 (0x00007a9e15800000)
+        # or
+        #   /tmp/python/install/bin/../lib/libpython3.13.so.1.0 (0x00007b9489c82000)
+        LDD_PATTERN = re.compile(r"^\s*(?:(.*?)\s+=>\s+)?(.*?)\s+\(.*\)")
     else:
         LDD_PATTERN = re.compile(r"\s*(.*?)\s+=>\s+(.*?)\s+\(.*\)")
 
+    # Resolve symlinks since GNU ldd contains a bug in processing a symlink to a binary
+    # using $ORIGIN: https://sourceware.org/bugzilla/show_bug.cgi?id=25263
     p = subprocess.run(
-        ['ldd', filename],
+        ['ldd', os.path.realpath(filename)],
         stdin=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -387,6 +395,12 @@ def _get_imports_ldd(filename, search_paths):
                 name, lib = m.group(1), m.group(2)
             else:
                 name, lib = m.group(1), m.group(2)
+                name = name or os.path.basename(lib)
+                if compat.is_linux:
+                    # Skip all ld variants listed https://sourceware.org/glibc/wiki/ABIList
+                    # plus musl's ld-musl-*.so.*.
+                    if re.fullmatch(r"ld(64)?(-linux|-musl)?(-.+)?\.so(\..+)?", os.path.basename(lib)):
+                        continue
             if name[:10] in ('linux-gate', 'linux-vdso'):
                 # linux-gate is a fake library which does not exist and should be ignored. See also:
                 # http://www.trilithium.com/johan/2005/08/linux-gate/

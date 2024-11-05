@@ -1,0 +1,1 @@
+(Linux/musl) Prevent ``ld-musl-x86_64.so.1`` from being collected.

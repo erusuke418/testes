@@ -1,0 +1,1 @@
+(GNU/Linux) Fix resolving binary dependencies linked using ``$ORIGIN``.
