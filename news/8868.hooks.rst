@@ -1,0 +1,2 @@
+Prevent ``IPython`` from being packaged redundantly if ``matplotlib`` is
+imported.
