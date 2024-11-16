@@ -89,17 +89,6 @@ Alternatively you may want to use the `linux64` build-guest
 provided by the Vagrantfile (see below).
 
 
-Cross Building for Different Architectures
-------------------------------------------
-
-Bootloaders can be built for other architectures such as ARM or MIPS using
-Docker_.
-The `Dockerfile <https://github.com/pyinstaller/pyinstaller/tree/develop/bootloader/Dockerfile>`_ contains the instructions on how to do this.
-Open it in some flavour of text previewer to see them::
-
-    less bootloader/Dockerfile
-
-
 Building for macOS
 ========================
 
