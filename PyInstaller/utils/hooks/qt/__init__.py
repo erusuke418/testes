@@ -1362,12 +1362,15 @@ def exclude_extraneous_qt_bindings(hook_name, qt_bindings_order=None):
         qt_bindings_order = _QT_BINDINGS  # Use default preference order
 
     env_qt_bindings = os.environ.get(_QT_API_ENV)
-    if env_qt_bindings is not None and env_qt_bindings not in _QT_BINDINGS:
-        logger.warning(
-            "%s: ignoring unsupported Qt bindings specified via %s environment variable (supported values: %r)!",
-            hook_name, _QT_API_ENV, _QT_BINDINGS
-        )
-        env_qt_bindings = None
+    if env_qt_bindings is not None:
+        # Case-normalize the value into capitalized name from _QT_BINDINGS for further processing.
+        normalized_name = {name.lower(): name for name in _QT_BINDINGS}.get(env_qt_bindings.lower())
+        if normalized_name is None:
+            logger.warning(
+                "%s: ignoring unsupported Qt bindings name %r in %s environment variable (supported values: %r)!",
+                hook_name, env_qt_bindings, _QT_API_ENV, _QT_BINDINGS
+            )
+        env_qt_bindings = normalized_name
 
     # First choice: see if a hook for top-level Qt bindings package has already been run; if it has, use that bindings
     # package. Due to check in the `ensure_single_qt_bindings_package` that these hooks use, only one such hook could
