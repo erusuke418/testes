@@ -148,6 +148,50 @@ jobs:
       - name: Update pip
         run: python -m pip install --upgrade pip setuptools wheel build
 
+      # On (macos-14, python 3.10), (macos-13, python 3.11) and (macos-14, python 3.11)
+      # combinations the initial `setuptools` installation seems to contain `.opt-1.pyc`
+      # files in `__pycache__` directories. During the upgrade, `pip` fails to remove
+      # those directories (https://github.com/pypa/pip/issues/11835).
+      #
+      # `setuptools` 75.4 removed its vendored copy of `importlib_resources`, but due to
+      # the above issue, the effectively empty directory remains, turning `importlib_resources`
+      # into defunct namespace package, which causes some of our tests to fail.
+      - name: Work around potentially broken setuptools upgrade
+        shell: python
+        run: |
+          import sys
+          import pathlib
+          import shutil
+          import importlib.util
+
+          spec = importlib.util.find_spec('setuptools._vendor.importlib_resources')
+          if spec is None:
+            print("Did not find setuptools-vendored copy of importlib_resources.")
+            sys.exit(0)
+          elif spec.loader is not None:
+            print("Found a valid setuptools-vendored copy of importlib_resources.")
+            sys.exit(0)
+
+          print("Found a defunct setuptools-vendored copy of importlib_resources!")
+
+          # List the contents of importlib_resources package directory for debug purposes
+          def list_directory(path, pad=""):
+            for child in path.iterdir():
+              if child.is_dir():
+                print(f"{pad} + {child.name}")
+                list_directory(child, pad + " ")
+              else:
+                print(f"{pad} - {child.name} ({child.stat().st_size} bytes)")
+
+          for path in spec.submodule_search_locations:
+            print(f"Listing contents of {path}")
+            list_directory(pathlib.Path(path))
+
+          # Remove
+          for path in spec.submodule_search_locations:
+            print(f"Removing {path}...")
+            shutil.rmtree(path)
+
       - name: Compile bootloader
         run: cd bootloader && python waf --tests all
 
