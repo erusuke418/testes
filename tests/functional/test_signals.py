@@ -66,11 +66,12 @@ def test_onefile_signal_handling(pyi_builder, forward_signals):
         # Wait for signal to be delivered or the specified timeout interval to pass.
         start_time = time.time()
         while True:
-            if time.time() - start_time >= timeout:
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= timeout:
                 print(f"Signal not received within {timeout} seconds!", file=sys.stderr)
                 break
             if return_code != 0:
-                print("Signal received!", file=sys.stderr)
+                print(f"Signal received! Elapsed time: {elapsed_time:.2f} seconds.", file=sys.stderr)
                 break
             time.sleep(0.1)  # 100 ms steps
 
