@@ -73,7 +73,7 @@ static struct PYI_CONTEXT _pyi_ctx;
 
 /* Pointer to global PYI_CONTEXT structure. Intended for use in signal
  * handlers that have no user data / context */
-struct PYI_CONTEXT *global_pyi_ctx = &_pyi_ctx;
+struct PYI_CONTEXT *const global_pyi_ctx = &_pyi_ctx;
 
 
 /* Large parts of `pyi_main` are implemented as helper functions. We

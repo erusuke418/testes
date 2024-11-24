@@ -286,7 +286,7 @@ struct PYI_CONTEXT
 #endif
 };
 
-extern struct PYI_CONTEXT *global_pyi_ctx;
+extern struct PYI_CONTEXT *const global_pyi_ctx;
 
 
 int pyi_main(struct PYI_CONTEXT *pyi_ctx);
