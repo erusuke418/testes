@@ -31,6 +31,7 @@
 #include <signal.h> /* kill */
 #include <sys/stat.h> /* struct stat */
 #include <sys/wait.h>
+#include <sys/sem.h> /* SysV semaphore API */
 
 #include <dirent.h>
 
@@ -541,6 +542,43 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
     sighandler_t signal_handler;
     int signum;
 
+    /* Create semaphore for synchronizing child and parent; we need to
+     * ensure that the child starts executing user's python code only
+     * *after* the parent has fully completed the `fork()` call *and* stored
+     * the child process ID to `pyi_ctx->child_pid` for the forwarding
+     * signal handlers. Failing to do so leads to sporadic failures
+     * in our signal handling test (`test_onefile_signal_handling`) when
+     * performed under heavy CPU load. See additional comments above
+     * the code block that sets up signal handler.
+     *
+     * The first choice for API would be un-named POSIX signals, but this
+     * is not supported on macOS. So we use the old SysV signals API... */
+
+    /* Argument for semctl(); according to API, we need to provide our
+     * own union definition... */
+    union {
+        int val;
+        struct semid_ds *buf;
+        unsigned short *array;
+    } sem_arg;
+
+    struct sembuf sem_op;  /* Argument for semop() */
+    int sem_id = -1;  /* Semaphore (array) ID */
+
+    /* Create semaphore */
+    sem_id = semget(IPC_PRIVATE, 1, 0660 | IPC_CREAT | IPC_EXCL);
+    if (sem_id < 0) {
+        PYI_PERROR("semget", "Failed to create sync semaphore!\n");
+        goto cleanup;
+    }
+
+    /* Initialize semaphore's value to 0 (= locked/acquired) */
+    sem_arg.val = 0;
+    if (semctl(sem_id, 0, SETVAL, sem_arg) < 0) {
+        PYI_PERROR("semctl", "Failed to initialize sync semaphore!\n");
+        goto cleanup;
+    }
+
     /* Install signal handlers to either forward received signals to the
      * child process, or ignore them (effectively blocking them).
      *
@@ -618,6 +656,16 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
         char *const *argv = (pyi_ctx->pyi_argv != NULL) ? pyi_ctx->pyi_argv : pyi_ctx->argv;
         const int argc = (pyi_ctx->pyi_argv != NULL) ? pyi_ctx->pyi_argc : pyi_ctx->argc;
 
+        /* Wait on the sync semaphore */
+        PYI_DEBUG("LOADER: waiting on sync semaphore...\n");
+        sem_op.sem_num = 0;
+        sem_op.sem_op = -1; /* P/decrement (= acquire semaphore) */
+        sem_op.sem_flg = 0;
+        if (semop(sem_id, &sem_op, 1) < 0) {
+            PYI_PERROR("semop", "Failed to wait on sync semaphore!\n");
+        }
+
+        /* Modify the LISTEN_PID environment variable, if necessary */
         if (_pyi_set_systemd_env() != 0) {
             PYI_WARNING("LOADER: application is started by systemd socket, but we cannot set proper LISTEN_PID on it.\n");
         }
@@ -657,6 +705,14 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
      * The exception is the `cleanup` block that frees argv_pyi; in the child,
      * wait_rc is -1, so the child exit code checking is skipped. */
     PYI_DEBUG("LOADER: forked child process with PID: %d\n", child_pid);
+
+    PYI_DEBUG("LOADER: signalling the sync semaphore...\n");
+    sem_op.sem_num = 0;
+    sem_op.sem_op = 1; /* V/increment (= release semaphore) */
+    sem_op.sem_flg = 0;
+    if (semop(sem_id, &sem_op, 1) < 0) {
+        PYI_PERROR("semop", "Failed to signal the sync semaphore!\n");
+    }
 
 #if defined(__APPLE__) && defined(WINDOWED)
     /* macOS: forward events to child */
@@ -720,6 +776,13 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
 #endif
 
 cleanup:
+    /* Destroy the sync semaphore (if available) */
+    if (sem_id >= 0) {
+        if (semctl(sem_id, 0, IPC_RMID) < 0) {
+            PYI_WARNING("LOADER: failed to destroy sync semaphore (errno %d)!\n", errno);
+        }
+    }
+
     /* Clean up the modified copy of command-line arguments (currently
      * applicable only to macOS windowed bootloader builds). */
 #if defined(__APPLE__) && defined(WINDOWED)
