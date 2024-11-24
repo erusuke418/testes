@@ -203,14 +203,18 @@ struct PYI_CONTEXT
 
     /* CTRL_CLOSE_EVENT, CTRL_SHUTDOWN_EVENT, or CTRL_LOGOFF_EVENT
      * received via installed console handler. */
-    unsigned char console_shutdown;
+    /* NOTE: marked as volatile because it is set in installed console
+     * handler, and read in the main codepath. */
+    volatile unsigned char console_shutdown;
 
     /* WM_QUERYENDSESSION received via hidden window. */
     unsigned char session_shutdown;
 #else
     /* Process ID of the child process (onefile mode). Keeping track of
      * the child PID allows us to forward signals to the child. */
-    pid_t child_pid;
+    /* NOTE: marked as volatile because it is read in the POSIX signal
+     * handler. */
+    volatile pid_t child_pid;
 
     /* Remember whether child has received a signal and what signal it was.
      * In onefile mode, this allows us to re-raise the signal in the parent
