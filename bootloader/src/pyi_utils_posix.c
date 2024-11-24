@@ -491,15 +491,18 @@ _ignoring_signal_handler(int signum)
 static void
 _signal_handler(int signum)
 {
+    pid_t child_pid = global_pyi_ctx->child_pid; /* Read from volatile global variable */
+
     /* Forward signal to the child. Avoid generating debug messages, as
      * functions involved are generally not signal safe. Furthermore, it
      * may result in endless spamming of SIGPIPE, as reported and
      * diagnosed in #5270. */
-    if (!global_pyi_ctx->child_pid) {
-        /* No-op if child process does not exist (yet or anymore) */
+    if (child_pid <= 0) {
+        /* No-op if child process does not exist (yet or anymore), or
+         * if fork() returned -1 due to error. */
         return;
     }
-    kill(global_pyi_ctx->child_pid, signum);
+    kill(child_pid, signum);
 }
 
 /* Start frozen application in a subprocess. The frozen application runs
@@ -507,7 +510,7 @@ _signal_handler(int signum)
 int
 pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
 {
-    pid_t pid = 0;
+    pid_t child_pid = 0;
     int rc = 0;
     int wait_rc = -1;
 
@@ -577,14 +580,18 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
 #endif
 
     /* Fork the child process. */
-    pid = fork();
-    if (pid < 0) {
+    /* Immediately store the child PID into the volatile variable in the
+     * context structure, in an attempt to make it available to signal
+     * handler as soon as possible. */
+    pyi_ctx->child_pid = fork();
+    child_pid = pyi_ctx->child_pid; /* Copy back the value for local use */
+    if (child_pid < 0) {
         PYI_WARNING("LOADER: failed to fork child process: %s\n", strerror(errno));
         goto cleanup;
     }
 
     /* Child code. */
-    if (pid == 0) {
+    if (child_pid == 0) {
         /* Replace process by starting a new application. */
         /* If modified arguments (pyi_ctx->pyi_argv) are available, use
          * those. Otherwise, use the original pyi_ctx->argv. */
@@ -629,16 +636,14 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
     /* From here to end-of-function is parent code (since the child exec'd).
      * The exception is the `cleanup` block that frees argv_pyi; in the child,
      * wait_rc is -1, so the child exit code checking is skipped. */
-
-    /* Store the child PID. */
-    pyi_ctx->child_pid = pid;
+    PYI_DEBUG("LOADER: forked child process with PID: %d\n", child_pid);
 
 #if defined(__APPLE__) && defined(WINDOWED)
     /* macOS: forward events to child */
     do {
         /* The below loop will iterate about once every second on Apple,
          * waiting on the event queue most of that time. */
-        wait_rc = waitpid(pyi_ctx->child_pid, &rc, WNOHANG);
+        wait_rc = waitpid(child_pid, &rc, WNOHANG);
         if (wait_rc == 0) {
             /* Check if we have a pending event that we need to forward... */
             if (pyi_apple_has_pending_event(pyi_ctx->ae_ctx)) {
@@ -664,7 +669,7 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
     /* Uninstall event handlers */
     pyi_apple_uninstall_event_handlers(&pyi_ctx->ae_ctx);
 #else
-    wait_rc = waitpid(pyi_ctx->child_pid, &rc, 0);
+    wait_rc = waitpid(child_pid, &rc, 0);
 #endif
 
     /* Reset stored child PID - this aims to immediately turn forwarding
