@@ -498,12 +498,29 @@ _signal_handler(int signum)
      * functions involved are generally not signal safe. Furthermore, it
      * may result in endless spamming of SIGPIPE, as reported and
      * diagnosed in #5270. */
+
+#if defined(LAUNCH_DEBUG)
+    global_pyi_ctx->signal_forward_all++;
+#endif
+
     if (child_pid <= 0) {
         /* No-op if child process does not exist (yet or anymore), or
          * if fork() returned -1 due to error. */
+#if defined(LAUNCH_DEBUG)
+        global_pyi_ctx->signal_forward_noop++;
+#endif
         return;
     }
+
+#if defined(LAUNCH_DEBUG)
+    if (kill(child_pid, signum) == 0) {
+        global_pyi_ctx->signal_forward_ok++;
+    } else {
+        global_pyi_ctx->signal_forward_error++;
+    }
+#else
     kill(child_pid, signum);
+#endif
 
     errno = original_errno; /* Restore original errno */
 }
@@ -688,6 +705,19 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
     for (signum = 0; signum < num_signals; ++signum) {
         signal(signum, SIG_DFL);
     }
+
+    /* Display statistics from forwarding signal-handler. */
+#if defined(LAUNCH_DEBUG)
+    if (!pyi_ctx->ignore_signals) {
+        PYI_DEBUG(
+            "LOADER: signal forwarding statistics: all=%u, ok=%u, err=%u, noop=%u\n",
+            pyi_ctx->signal_forward_all,
+            pyi_ctx->signal_forward_ok,
+            pyi_ctx->signal_forward_error,
+            pyi_ctx->signal_forward_noop
+        );
+    }
+#endif
 
 cleanup:
     /* Clean up the modified copy of command-line arguments (currently

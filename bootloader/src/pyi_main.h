@@ -221,6 +221,19 @@ struct PYI_CONTEXT
      * once the temporary directory has been cleaned up. */
     int child_signalled;
     int child_signal;
+
+#if defined(LAUNCH_DEBUG)
+    /* Basic statistics for forwarding signal handler:
+     *  - number of received signals (number of times the handler was called)
+     *  - number of successfully forwarded signals
+     *  - number of errors during forwarding (number of failed kill() calls)
+     *  - number of no-op handler calls (with invalid child_pid).
+     * All members are volatile due to being modified in signal handler. */
+    volatile unsigned int signal_forward_all;
+    volatile unsigned int signal_forward_ok;
+    volatile unsigned int signal_forward_error;
+    volatile unsigned int signal_forward_noop;
+#endif /* defined(LAUNCH_DEBUG) */
 #endif
 
     /**
