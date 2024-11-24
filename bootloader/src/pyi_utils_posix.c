@@ -491,6 +491,7 @@ _ignoring_signal_handler(int signum)
 static void
 _signal_handler(int signum)
 {
+    int original_errno = errno; /* Store original errno */
     pid_t child_pid = global_pyi_ctx->child_pid; /* Read from volatile global variable */
 
     /* Forward signal to the child. Avoid generating debug messages, as
@@ -503,6 +504,8 @@ _signal_handler(int signum)
         return;
     }
     kill(child_pid, signum);
+
+    errno = original_errno; /* Restore original errno */
 }
 
 /* Start frozen application in a subprocess. The frozen application runs
