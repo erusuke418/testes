@@ -546,10 +546,10 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
      * ensure that the child starts executing user's python code only
      * *after* the parent has fully completed the `fork()` call *and* stored
      * the child process ID to `pyi_ctx->child_pid` for the forwarding
-     * signal handlers. Failing to do so leads to sporadic failures
-     * in our signal handling test (`test_onefile_signal_handling`) when
-     * performed under heavy CPU load. See additional comments above
-     * the code block that sets up signal handler.
+     * signal handlers (as well as installed the said handlers).
+     * Failing to do so leads to sporadic failures in our signal handling
+     * test (`test_onefile_signal_handling`) when performed under heavy
+     * CPU load.
      *
      * The first choice for API would be un-named POSIX signals, but this
      * is not supported on macOS. So we use the old SysV signals API... */
@@ -579,42 +579,6 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
         goto cleanup;
     }
 
-    /* Install signal handlers to either forward received signals to the
-     * child process, or ignore them (effectively blocking them).
-     *
-     * NOTE: we install signal handlers *before* forking the child process
-     * in order to prevent sporadic failures of our signal handling test
-     * (`test_onefile_signal_handling`); there, we signal the parent
-     * process from the child, and depending on the scenario (forward/block)
-     * expect child to either receive the forwarded signal or not receive
-     * the signal. If the signal handlers are installed after the `fork()`
-     * and `execvp()`, it might happen (in CPU contention scenarios) that
-     * the child proceeds with execution while the parent stalls for a bit,
-     * and thus child ends up signalling the parent before the latter has
-     * set up its signal handlers.
-     *
-     * In practice, this early setup should not make any difference; while
-     * the signal handlers are inherited when the child process is forked,
-     * the subsequent program re-execution via execvp() ends up resetting
-     * them. */
-    if (pyi_ctx->ignore_signals) {
-        PYI_DEBUG("LOADER: registering signal handlers to ignore received signals.\n");
-        signal_handler = &_ignoring_signal_handler;
-    } else {
-        PYI_DEBUG("LOADER: registering signal handlers to forward received signals to child.\n");
-        signal_handler = &_signal_handler;
-    }
-
-    for (signum = 0; signum < num_signals; ++signum) {
-        /* Don't mess with SIGCHLD/SIGCLD; it affects our ability
-         * to wait() for the child to exit. Similarly, do not change
-         * don't change SIGTSP handling to allow Ctrl-Z */
-        if (signum == SIGCHLD || signum == SIGCLD || signum == SIGTSTP) {
-            continue;
-        }
-        signal(signum, signal_handler);
-    }
-
     /* macOS: Apple Events handling */
 #if defined(__APPLE__) && defined(WINDOWED)
     /* Initialize pyi_argc and pyi_argv with original argc and argv.
@@ -638,11 +602,7 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
 #endif
 
     /* Fork the child process. */
-    /* Immediately store the child PID into the volatile variable in the
-     * context structure, in an attempt to make it available to signal
-     * handler as soon as possible. */
-    pyi_ctx->child_pid = fork();
-    child_pid = pyi_ctx->child_pid; /* Copy back the value for local use */
+    child_pid = fork();
     if (child_pid < 0) {
         PYI_WARNING("LOADER: failed to fork child process: %s\n", strerror(errno));
         goto cleanup;
@@ -701,10 +661,33 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
         /* NOTREACHED */
     }
 
-    /* From here to end-of-function is parent code (since the child exec'd).
-     * The exception is the `cleanup` block that frees argv_pyi; in the child,
-     * wait_rc is -1, so the child exit code checking is skipped. */
+    /* From here to end-of-function is parent code (since the child exec'd,
+     * or exited on exec failure). */
     PYI_DEBUG("LOADER: forked child process with PID: %d\n", child_pid);
+
+    /* Store child PID to context structure for use in forwarding signal
+     * handler (as well as Apple event handler on macOS). */
+    pyi_ctx->child_pid = child_pid;
+
+    /* Install signal handlers to either forward received signals to the
+     * child process, or ignore them (effectively blocking them). */
+    if (pyi_ctx->ignore_signals) {
+        PYI_DEBUG("LOADER: registering signal handlers to ignore received signals.\n");
+        signal_handler = &_ignoring_signal_handler;
+    } else {
+        PYI_DEBUG("LOADER: registering signal handlers to forward received signals to child.\n");
+        signal_handler = &_signal_handler;
+    }
+
+    for (signum = 0; signum < num_signals; ++signum) {
+        /* Don't mess with SIGCHLD/SIGCLD; it affects our ability
+         * to wait() for the child to exit. Similarly, do not change
+         * don't change SIGTSP handling to allow Ctrl-Z */
+        if (signum == SIGCHLD || signum == SIGCLD || signum == SIGTSTP) {
+            continue;
+        }
+        signal(signum, signal_handler);
+    }
 
     PYI_DEBUG("LOADER: signalling the sync semaphore...\n");
     sem_op.sem_num = 0;
