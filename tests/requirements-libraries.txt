@@ -21,7 +21,7 @@ future==1.0.0
 gevent==24.11.1; python_version >= '3.9'
 ipython==8.30.0; python_version >= '3.10'
 keyring==25.5.0
-matplotlib==3.10.0; python_version >= '3.9'
+matplotlib==3.10.0; python_version >= '3.10'
 numpy==2.2.0; python_version >= '3.10'
 pandas==2.2.3; python_version >= '3.9'
 pygments==2.18.0
@@ -94,6 +94,7 @@ Django==4.2.8; python_version == '3.9'  # pyup: ignore
 
 numpy==2.0.1; python_version == '3.9'  # pyup: ignore
 scipy==1.13.1; python_version == '3.9'  # pyup: ignore
+matplotlib==3.9.3; python_version == '3.9'  # pyup: ignore
 
 sphinx==7.4.7; python_version == '3.9'  # pyup: ignore
 
