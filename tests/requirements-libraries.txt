@@ -52,19 +52,19 @@ PyQtWebEngine==5.15.7
 # version of corresponding PyQt bindings packages. That is because Qt6 is under active development, and
 # thus the ABI is still changing.
 PyQt6-sip==13.9.1; python_version >= '3.9'
-PyQt6==6.8.0
-PyQt6-Qt6==6.8.1
-PyQt6-3D==6.8.0
-PyQt6-3D-Qt6==6.8.1
-PyQt6-Charts==6.8.0
-PyQt6-Charts-Qt6==6.8.1
-PyQt6-DataVisualization==6.8.0
-PyQt6-DataVisualization-Qt6==6.8.1
-PyQt6-NetworkAuth==6.8.0
-PyQt6-NetworkAuth-Qt6==6.8.1
-PyQt6-QScintilla==2.14.1  # Does not have a corresponding -Qt6 package
-PyQt6-WebEngine==6.8.0
-PyQt6-WebEngine-Qt6==6.8.1
+PyQt6==6.8.0; python_version >= '3.9'
+PyQt6-Qt6==6.8.1; python_version >= '3.9'
+PyQt6-3D==6.8.0; python_version >= '3.9'
+PyQt6-3D-Qt6==6.8.1; python_version >= '3.9'
+PyQt6-Charts==6.8.0; python_version >= '3.9'
+PyQt6-Charts-Qt6==6.8.1; python_version >= '3.9'
+PyQt6-DataVisualization==6.8.0; python_version >= '3.9'
+PyQt6-DataVisualization-Qt6==6.8.1; python_version >= '3.9'
+PyQt6-NetworkAuth==6.8.0; python_version >= '3.9'
+PyQt6-NetworkAuth-Qt6==6.8.1; python_version >= '3.9'
+PyQt6-QScintilla==2.14.1; python_version >= '3.9'  # Does not have a corresponding -Qt6 package
+PyQt6-WebEngine==6.8.0; python_version >= '3.9'
+PyQt6-WebEngine-Qt6==6.8.1; python_version >= '3.9'
 python-dateutil==2.9.0.post0
 pytz==2024.2
 requests==2.32.3
@@ -113,6 +113,16 @@ PyGObject==3.48.2; sys_platform == 'linux' and python_version == '3.8'  # pyup: 
 
 PyQt5-sip==12.15.0; python_version == '3.8'  # pyup: ignore
 PyQt6-sip==13.8.0; python_version == '3.8'  # pyup: ignore
+PyQt6==6.7.1; python_version == '3.8'  # pyup: ignore
+PyQt6-Qt6==6.7.3; python_version == '3.8'  # pyup: ignore
+PyQt6-3D==6.7.0; python_version == '3.8'  # pyup: ignore
+PyQt6-3D-Qt6==6.7.3; python_version == '3.8'  # pyup: ignore
+PyQt6-Charts==6.7.0; python_version == '3.8'  # pyup: ignore
+PyQt6-Charts-Qt6==6.7.3; python_version == '3.8'  # pyup: ignore
+PyQt6-DataVisualization==6.7.0; python_version == '3.8'  # pyup: ignore
+PyQt6-DataVisualization-Qt6==6.7.3; python_version == '3.8'  # pyup: ignore
+PyQt6-NetworkAuth==6.7.0; python_version == '3.8'  # pyup: ignore
+PyQt6-NetworkAuth-Qt6==6.7.3; python_version == '3.8'  # pyup: ignore
 
 PySide6==6.6.3.1; python_version == '3.8'  # pyup: ignore
 PySide6-Addons==6.6.3.1; python_version == '3.8'  # pyup: ignore
