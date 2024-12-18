@@ -102,9 +102,9 @@ def _build_pyz_prefix_tree(pyz_archive):
     return tree
 
 
-class PyiFrozenImporter:
+class PyiFrozenFinder:
     """
-    PyInstaller's frozen module importer (finder + loader) for specific search path.
+    PyInstaller's frozen path entry finder for specific search path.
 
     Per-path instances allow us to properly translate the given module name ("fullname") into full PYZ entry name.
     For example, with search path being `sys._MEIPASS`, the module "mypackage.mod" would translate to "mypackage.mod"
@@ -291,13 +291,17 @@ class PyiFrozenImporter:
             ]
             return spec
 
+        # Instantiate frozen loader for the module
+        loader = PyiFrozenLoader(fullname, self._pyz_archive, self._pyz_entry_prefix)
+
         # Resolve full filename, as if the module/package was located on filesystem.
-        origin = self.get_filename(fullname)
+        # This is done by the loader.
+        origin = loader.path
         is_package = typecode == pyimod01_archive.PYZ_ITEM_PKG
 
         spec = _frozen_importlib.ModuleSpec(
             fullname,
-            self,  # loader
+            loader,
             is_package=is_package,
             origin=origin,
         )
@@ -349,6 +353,34 @@ class PyiFrozenImporter:
             #
             loader, portions = self.find_loader(fullname)
             return loader
+
+
+class PyiFrozenLoader:
+    """
+    PyInstaller's frozen loader for modules in the PYZ archive, which are discovered by PyiFrozenFinder.
+    """
+    def __init__(self, name, pyz_archive, pyz_entry_prefix):
+        # Store the PYZ archive instance and PYZ entry prefix that are passed from the PyiFrozenFinder.
+        self._pyz_archive = pyz_archive
+        self._pyz_entry_prefix = pyz_entry_prefix
+
+        module_file = self.get_filename(name)
+
+        # The properties defined as part of importlib.abc.FileLoader
+        self.name = name  # The name of the module the loader can handle.
+        self.path = module_file  # Path to the file of the module
+
+    def _compute_pyz_entry_name(self, fullname):
+        """
+        Convert module fullname into PYZ entry name, subject to the prefix implied by search path of finder that
+        instantiated the loader.
+        """
+        tail_module = fullname.rpartition('.')[2]
+
+        if self._pyz_entry_prefix:
+            return self._pyz_entry_prefix + "." + tail_module
+        else:
+            return tail_module
 
     #-- Core PEP451 loader functionality as defined by importlib.abc.Loader
     # https://docs.python.org/3/library/importlib.html#importlib.abc.Loader
@@ -628,18 +660,18 @@ def install():
             sys.meta_path.remove(entry)
             break
 
-    # Insert our hook for `PyiFrozenImporter` into `sys.path_hooks`. Place it after `zipimporter`, if available.
+    # Insert our hook for `PyiFrozenFinder` into `sys.path_hooks`. Place it after `zipimporter`, if available.
     for idx, entry in enumerate(sys.path_hooks):
         if getattr(entry, '__name__', None) == 'zipimporter':
             trace(f"PyInstaller: inserting our finder hook at index {idx + 1} in sys.path_hooks.")
-            sys.path_hooks.insert(idx + 1, PyiFrozenImporter.path_hook)
+            sys.path_hooks.insert(idx + 1, PyiFrozenFinder.path_hook)
             break
     else:
         trace("PyInstaller: zipimporter hook not found in sys.path_hooks! Prepending our finder hook to the list.")
-        sys.path_hooks.insert(0, PyiFrozenImporter.path_hook)
+        sys.path_hooks.insert(0, PyiFrozenFinder.path_hook)
 
     # Python might have already created a `FileFinder` for `sys._MEIPASS`. Remove the entry from path importer cache,
-    # so that next loading attempt creates `PyiFrozenImporter` instead. This could probably be avoided altogether if
+    # so that next loading attempt creates `PyiFrozenFinder` instead. This could probably be avoided altogether if
     # we refrained from adding `sys._MEIPASS` to `sys.path` until our importer hooks is in place.
     sys.path_importer_cache.pop(sys._MEIPASS, None)
 
@@ -685,7 +717,7 @@ def _fixup_frozen_stdlib():
         if is_pkg:
             orig_name += '.__init__'
 
-        # We set suffix to .pyc to be consistent with our PyiFrozenImporter.
+        # We set suffix to .pyc to be consistent with our PyiFrozenLoader.
         filename = os.path.join(sys._MEIPASS, *orig_name.split('.')) + '.pyc'
 
         # Fixup the __file__ attribute

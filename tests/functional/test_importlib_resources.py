@@ -15,7 +15,7 @@
 #
 # Running the unfrozen test script allows us to verify the behavior of importlib.resources (or its importlib_resources
 # back-port for python 3.8 and earlier) and thereby also validate the test script itself. Running the frozen test
-# validates the behavior of the resource reader implemented by PyInstaller's PyiFrozenImporter.
+# validates the behavior of the resource reader provided by PyInstaller's PyiFrozenLoader.
 #
 # For details on the structure of the test and the contents of the test package, see the top comment in the test script
 # itself.
@@ -80,7 +80,7 @@ def test_importlib_resources_frozen(pyi_builder, tmpdir, script_dir):
 #    the same as in unfrozen python - python's built-in import machinery takes care of the namespace package and the
 #    associated resource reader.
 #  - if the namespace package is collected into PYZ (in addition to resources being collected as data files), the
-#    namespace package ends up being handled by PyInstaller's `PyiFrozenImporter`, which requires extra care to ensure
+#    namespace package ends up being handled by PyInstaller's `PyiFrozenFinder`, which requires extra care to ensure
 #    compatibility with `importlib` resource reader.
 # The test covers both scenarios via `as_package` parameter.
 @pytest.mark.parametrize('as_package', [True, False])

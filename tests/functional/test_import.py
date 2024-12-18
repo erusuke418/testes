@@ -156,7 +156,7 @@ def test_module_with_coding_utf8(pyi_builder):
     pyi_builder.test_source("import module_with_coding_utf8")
 
 
-# Test that our PyiFrozenImporter's get_source() method can load source files with utf-8 emoji characters.
+# Test that our PyiFrozenLoader's get_source() method can load source files with utf-8 emoji characters.
 # See issue #6143.
 def test_source_utf8_emoji(pyi_builder):
     # Collect the module's source as data file
