@@ -291,14 +291,20 @@ class PyiFrozenFinder:
             ]
             return spec
 
-        # Instantiate frozen loader for the module
-        loader = PyiFrozenLoader(fullname, self._pyz_archive, self._pyz_entry_prefix)
-
-        # Resolve full filename, as if the module/package was located on filesystem.
-        # This is done by the loader.
-        origin = loader.path
         is_package = typecode == pyimod01_archive.PYZ_ITEM_PKG
 
+        # Instantiate frozen loader for the module
+        loader = PyiFrozenLoader(
+            name=fullname,
+            pyz_archive=self._pyz_archive,
+            pyz_entry_name=pyz_entry_name,
+            is_package=is_package,
+        )
+
+        # Resolve full filename, as if the module/package was located on filesystem. This is done by the loader.
+        origin = loader.path
+
+        # Construct spec for module, using all collected information.
         spec = _frozen_importlib.ModuleSpec(
             fullname,
             loader,
@@ -368,27 +374,33 @@ def _check_name(method):
 class PyiFrozenLoader:
     """
     PyInstaller's frozen loader for modules in the PYZ archive, which are discovered by PyiFrozenFinder.
+
+    Since this loader is instantiated only from PyiFrozenFinder and since each loader instance is tied to a specific
+    module, the fact that the loader was instantiated serves as the proof that the module exists in the PYZ archive.
+    Hence, we can avoid any additional validation in the implementation of the loader's methods.
     """
-    def __init__(self, name, pyz_archive, pyz_entry_prefix):
-        # Store the PYZ archive instance and PYZ entry prefix that are passed from the PyiFrozenFinder.
+    def __init__(self, name, pyz_archive, pyz_entry_name, is_package):
+        # Store the reference to PYZ archive (for code object retrieval), as well as full PYZ entry name
+        # and typecode, all of which are passed from the PyiFrozenFinder.
         self._pyz_archive = pyz_archive
-        self._pyz_entry_prefix = pyz_entry_prefix
+        self._pyz_entry_name = pyz_entry_name
+        self._is_package = is_package
 
-        # The properties defined as part of importlib.abc.FileLoader
-        self.name = name  # The name of the module the loader can handle.
-        self.path = self.get_filename(name)  # Path to the file of the module
-
-    def _compute_pyz_entry_name(self, fullname):
-        """
-        Convert module fullname into PYZ entry name, subject to the prefix implied by search path of finder that
-        instantiated the loader.
-        """
-        tail_module = fullname.rpartition('.')[2]
-
-        if self._pyz_entry_prefix:
-            return self._pyz_entry_prefix + "." + tail_module
+        # Compute the module file path, as if module was located on filesyste.
+        # NOTE: since we are using sys._MEIPASS as prefix, we need to construct path from full PYZ entry name
+        # (so that a module with `name`=`jaraco.text` and `pyz_entry_name`=`setuptools._vendor.jaraco.text`
+        # ends up with path set to `sys._MEIPASS/setuptools/_vendor/jaraco/text/__init__.pyc` instead of
+        # `sys._MEIPASS/jaraco/text/__init__.pyc`).
+        if is_package:
+            module_file = os.path.join(sys._MEIPASS, pyz_entry_name.replace('.', os.path.sep), '__init__.pyc')
         else:
-            return tail_module
+            module_file = os.path.join(sys._MEIPASS, pyz_entry_name.replace('.', os.path.sep) + '.pyc')
+
+        # These properties are defined as part of importlib.abc.FileLoader. They are used by our implementation
+        # (e.g., module name validation, get_filename(), get_source(), get_resource_reader()), and might also be used
+        # by 3rd party code that naively expects to be dealing with a FileLoader instance.
+        self.name = name  # The name of the module the loader can handle.
+        self.path = module_file  # Path to the file of the module
 
     #-- Core PEP451 loader functionality as defined by importlib.abc.Loader
     # https://docs.python.org/3/library/importlib.html#importlib.abc.Loader
@@ -410,7 +422,7 @@ class PyiFrozenLoader:
         https://docs.python.org/3/library/importlib.html#importlib.abc.Loader.exec_module
         """
         spec = module.__spec__
-        bytecode = self.get_code(spec.name)
+        bytecode = self.get_code(spec.name)  # NOTE: get_code verifies that `spec.name` matches `self.name`!
         if bytecode is None:
             raise RuntimeError(f"Failed to retrieve bytecode for {spec.name!r}!")
 
@@ -455,24 +467,7 @@ class PyiFrozenLoader:
 
         https://docs.python.org/3/library/importlib.html#importlib.abc.ExecutionLoader.get_filename
         """
-        # Resolve fullname -> PYZ entry name (in case custom search path is in effect)
-        pyz_entry_name = self._compute_pyz_entry_name(fullname)
-
-        # Look up the PYZ entry
-        entry_data = self._pyz_archive.toc.get(pyz_entry_name)
-        if entry_data is None:
-            raise ImportError(f'Module {fullname!r} not found in PYZ archive (entry {pyz_entry_name!r}).')
-        typecode = entry_data[0]
-
-        # NOTE: since we are using sys._MEIPASS as prefix, we need to construct path from resolved PYZ entry name
-        # (equivalently, we could combine `self._path` and last part of `fullname`).
-        if typecode == pyimod01_archive.PYZ_ITEM_PKG:
-            return os.path.join(sys._MEIPASS, pyz_entry_name.replace('.', os.path.sep), '__init__.pyc')
-        elif typecode == pyimod01_archive.PYZ_ITEM_MODULE:
-            return os.path.join(sys._MEIPASS, pyz_entry_name.replace('.', os.path.sep) + '.pyc')
-
-        # Unsupported entry type
-        return None
+        return self.path
 
     #-- PEP302 protocol extensions as defined by importlib.abc.InspectLoader
     # https://docs.python.org/3/library/importlib.html#importlib.abc.InspectLoader
@@ -484,15 +479,7 @@ class PyiFrozenLoader:
 
         https://docs.python.org/3/library/importlib.html#importlib.abc.InspectLoader.get_code
         """
-        # Resolve fullname -> PYZ entry name (in case custom search path is in effect)
-        pyz_entry_name = self._compute_pyz_entry_name(fullname)
-
-        # Look up the PYZ entry - so we can raise ImportError for non-existing modules.
-        entry_data = self._pyz_archive.toc.get(pyz_entry_name)
-        if entry_data is None:
-            raise ImportError(f'Module {fullname!r} not found in PYZ archive (entry {pyz_entry_name!r}).')
-
-        return self._pyz_archive.extract(pyz_entry_name)
+        return self._pyz_archive.extract(self._pyz_entry_name)
 
     @_check_name
     def get_source(self, fullname):
@@ -503,14 +490,10 @@ class PyiFrozenLoader:
 
         https://docs.python.org/3/library/importlib.html#importlib.abc.InspectLoader.get_source
         """
-        # Use getfilename() to obtain path to file if it were located on filesystem. This implicitly checks that the
-        # fullname is valid.
-        filename = self.get_filename(fullname)
-
         # FIXME: according to python docs "if source code is available, then the [getfilename()] method should return
         # the path to the source file, regardless of whether a bytecode was used to load the module.". At the moment,
         # our implementation always returns pyc suffix.
-        filename = filename[:-1]
+        filename = self.path[:-1]
 
         try:
             # Read in binary mode, then decode
@@ -531,18 +514,7 @@ class PyiFrozenLoader:
 
         https://docs.python.org/3/library/importlib.html#importlib.abc.InspectLoader.is_package
         """
-        # Resolve fullname -> PYZ entry name (in case custom search path is in effect)
-        pyz_entry_name = self._compute_pyz_entry_name(fullname)
-
-        # Look up the PYZ entry - so we can raise ImportError for non-existing modules.
-        entry_data = self._pyz_archive.toc.get(pyz_entry_name)
-        if entry_data is None:
-            raise ImportError(f'Module {fullname!r} not found in PYZ archive (entry {pyz_entry_name!r}).')
-        typecode = entry_data[0]
-
-        # We do not need to worry about PEP420 namespace package entries (pyimod01_archive.PYZ_ITEM_NSPKG) here, because
-        # namespace packages do not use the loader part of this importer.
-        return typecode == pyimod01_archive.PYZ_ITEM_PKG
+        return self._is_package
 
     #-- PEP302 protocol extensions as dfined by importlib.abc.ResourceLoader
     # https://docs.python.org/3/library/importlib.html#importlib.abc.ResourceLoader
