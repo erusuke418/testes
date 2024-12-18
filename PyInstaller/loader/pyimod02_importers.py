@@ -355,6 +355,16 @@ class PyiFrozenFinder:
             return loader
 
 
+# Helper for enforcing module name in PyiFrozenLoader methods.
+def _check_name(method):
+    def _check_name_wrapper(self, name, *args, **kwargs):
+        if self.name != name:
+            raise ImportError(f'loader for {self.name} cannot handle {name}', name=name)
+        return method(self, name, *args, **kwargs)
+
+    return _check_name_wrapper
+
+
 class PyiFrozenLoader:
     """
     PyInstaller's frozen loader for modules in the PYZ archive, which are discovered by PyiFrozenFinder.
@@ -364,11 +374,9 @@ class PyiFrozenLoader:
         self._pyz_archive = pyz_archive
         self._pyz_entry_prefix = pyz_entry_prefix
 
-        module_file = self.get_filename(name)
-
         # The properties defined as part of importlib.abc.FileLoader
         self.name = name  # The name of the module the loader can handle.
-        self.path = module_file  # Path to the file of the module
+        self.path = self.get_filename(name)  # Path to the file of the module
 
     def _compute_pyz_entry_name(self, fullname):
         """
@@ -420,6 +428,7 @@ class PyiFrozenLoader:
     # code that might still be using it.
     if True:
 
+        @_check_name
         def load_module(self, fullname):
             """
             A legacy method for loading a module. If the module cannot be loaded, ImportError is raised, otherwise the
@@ -435,6 +444,7 @@ class PyiFrozenLoader:
 
     #-- PEP302 protocol extensions as defined by importlib.abc.ExecutionLoader
     # https://docs.python.org/3/library/importlib.html#importlib.abc.ExecutionLoader
+    @_check_name
     def get_filename(self, fullname):
         """
         A method that is to return the value of __file__ for the specified module. If no path is available, ImportError
@@ -466,6 +476,7 @@ class PyiFrozenLoader:
 
     #-- PEP302 protocol extensions as defined by importlib.abc.InspectLoader
     # https://docs.python.org/3/library/importlib.html#importlib.abc.InspectLoader
+    @_check_name
     def get_code(self, fullname):
         """
         Return the code object for a module, or None if the module does not have a code object (as would be the case,
@@ -483,6 +494,7 @@ class PyiFrozenLoader:
 
         return self._pyz_archive.extract(pyz_entry_name)
 
+    @_check_name
     def get_source(self, fullname):
         """
         A method to return the source of a module. It is returned as a text string using universal newlines, translating
@@ -511,6 +523,7 @@ class PyiFrozenLoader:
         # Source code is unavailable.
         return None
 
+    @_check_name
     def is_package(self, fullname):
         """
         A method to return a true value if the module is a package, a false value otherwise. ImportError is raised if
@@ -548,14 +561,12 @@ class PyiFrozenLoader:
             return fp.read()
 
     #-- Support for `importlib.resources`.
+    @_check_name
     def get_resource_reader(self, fullname):
         """
         Return resource reader compatible with `importlib.resources`.
         """
-        # Resolve fullname -> PYZ entry name (in case custom search path is in effect)
-        pyz_entry_name = self._compute_pyz_entry_name(fullname)
-
-        return PyiFrozenResourceReader(self, pyz_entry_name)
+        return PyiFrozenResourceReader(self)
 
 
 class PyiFrozenResourceReader:
@@ -589,15 +600,12 @@ class PyiFrozenResourceReader:
       https://github.com/python/cpython/blob/839d7893943782ee803536a47f1d4de160314f85/Lib/importlib/abc.py#L422
       https://github.com/python/cpython/blob/839d7893943782ee803536a47f1d4de160314f85/Lib/importlib/abc.py#L312
     """
-    def __init__(self, importer, name):
+    def __init__(self, loader):
         # Local import to avoid including `pathlib` and its dependencies in `base_library.zip`
-        from pathlib import Path
-        self.importer = importer
-        if self.importer.is_package(name):  # covers both normal packages and PEP-420 namespace packages
-            self.path = Path(sys._MEIPASS).joinpath(*name.split('.'))
-        else:
-            # For modules, we should return the path to their parent (package) directory.
-            self.path = Path(sys._MEIPASS).joinpath(*name.split('.')[:-1])
+        import pathlib
+        # This covers both modules and (regular) packages. Note that PEP-420 namespace packages are not handled by this
+        # resource reader (since they are not handled by PyiFrozenLoader, which uses this reader).
+        self.path = pathlib.Path(loader.path).parent
 
     def open_resource(self, resource):
         return self.files().joinpath(resource).open('rb')
