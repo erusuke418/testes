@@ -133,10 +133,12 @@ class BUNDLE(Target):
         return True
 
     # Helper for determining whether the given file belongs to a .framework bundle or not. If it does, it returns
-    # the path to the top-level .framework bundle directory; otherwise, returns None.
+    # the path to the top-level .framework bundle directory; otherwise, returns None. In case of nested .framework
+    # bundles, the path to the top-most .framework bundle directory is returned.
     @staticmethod
     def _is_framework_file(dest_path):
-        for parent in dest_path.parents:
+        # NOTE: reverse the parents list because we are looking for the top-most .framework bundle directory!
+        for parent in reversed(dest_path.parents):
             if parent.name.endswith('.framework'):
                 return parent
         return None
