@@ -568,15 +568,23 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
     /* Create semaphore */
     sem_id = semget(IPC_PRIVATE, 1, 0660 | IPC_CREAT | IPC_EXCL);
     if (sem_id < 0) {
-        PYI_PERROR("semget", "Failed to create sync semaphore!\n");
-        goto cleanup;
+        /* Allow semaphore creation to fail, for whatever reason, and
+         * disable parent/child sync in that case. Not having the sync
+         * should be of little consequence outside of PyInstaller's own
+         * POSIX signal test suite, so it should not be considered fatal.
+         * For example, under cygwin, semget() is only available when
+         * cygserver is running, which might not always be the case.
+         * There might be other failure modes on other POSIX systems. */
+        PYI_DEBUG("LOADER: failed to create sync semaphore (errno %d) - disabling sync.\n", errno);
     }
 
     /* Initialize semaphore's value to 0 (= locked/acquired) */
-    sem_arg.val = 0;
-    if (semctl(sem_id, 0, SETVAL, sem_arg) < 0) {
-        PYI_PERROR("semctl", "Failed to initialize sync semaphore!\n");
-        goto cleanup;
+    if (sem_id >= 0) {
+        sem_arg.val = 0;
+        if (semctl(sem_id, 0, SETVAL, sem_arg) < 0) {
+            PYI_PERROR("semctl", "Failed to initialize sync semaphore!\n");
+            goto cleanup;
+        }
     }
 
     /* macOS: Apple Events handling */
@@ -617,12 +625,14 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
         const int argc = (pyi_ctx->pyi_argv != NULL) ? pyi_ctx->pyi_argc : pyi_ctx->argc;
 
         /* Wait on the sync semaphore */
-        PYI_DEBUG("LOADER: waiting on sync semaphore...\n");
-        sem_op.sem_num = 0;
-        sem_op.sem_op = -1; /* P/decrement (= acquire semaphore) */
-        sem_op.sem_flg = 0;
-        if (semop(sem_id, &sem_op, 1) < 0) {
-            PYI_PERROR("semop", "Failed to wait on sync semaphore!\n");
+        if (sem_id >= 0) {
+            PYI_DEBUG("LOADER: waiting on sync semaphore...\n");
+            sem_op.sem_num = 0;
+            sem_op.sem_op = -1; /* P/decrement (= acquire semaphore) */
+            sem_op.sem_flg = 0;
+            if (semop(sem_id, &sem_op, 1) < 0) {
+                PYI_PERROR("semop", "Failed to wait on sync semaphore!\n");
+            }
         }
 
         /* Modify the LISTEN_PID environment variable, if necessary */
@@ -689,12 +699,14 @@ pyi_utils_create_child(struct PYI_CONTEXT *pyi_ctx)
         signal(signum, signal_handler);
     }
 
-    PYI_DEBUG("LOADER: signalling the sync semaphore...\n");
-    sem_op.sem_num = 0;
-    sem_op.sem_op = 1; /* V/increment (= release semaphore) */
-    sem_op.sem_flg = 0;
-    if (semop(sem_id, &sem_op, 1) < 0) {
-        PYI_PERROR("semop", "Failed to signal the sync semaphore!\n");
+    if (sem_id >= 0) {
+        PYI_DEBUG("LOADER: signalling the sync semaphore...\n");
+        sem_op.sem_num = 0;
+        sem_op.sem_op = 1; /* V/increment (= release semaphore) */
+        sem_op.sem_flg = 0;
+        if (semop(sem_id, &sem_op, 1) < 0) {
+            PYI_PERROR("semop", "Failed to signal the sync semaphore!\n");
+        }
     }
 
 #if defined(__APPLE__) && defined(WINDOWED)
