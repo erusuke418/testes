@@ -53,11 +53,19 @@ def _retrieve_setuptools_info():
             filter=lambda name: name != 'setuptools._distutils.tests',
         )
 
+    # Check if `setuptools._vendor` exists. Some linux distributions opt to de-vendor `setuptools` and remove the
+    # `setuptools._vendor` directory altogether. If this is the case, most of additional processing below should be
+    # skipped to avoid errors and warnings about non-existent `setuptools._vendor` module.
+    try:
+        setuptools_vendor = importlib.import_module("setuptools._vendor")
+    except ModuleNotFoundError:
+        setuptools_vendor = None
+
     # Check for exposed packages/modules that are vendored by setuptools. If stand-alone version is not provided in the
     # environment, setuptools-vendored version is exposed (due to location of `setuptools._vendor` being appended to
     # `sys.path`. Applicable to v71.0.0 and later.
     vendored_status = dict()
-    if version >= (71, 0):
+    if version >= (71, 0) and setuptools_vendor is not None:
         VENDORED_CANDIDATES = (
             "autocommand",
             "backports.tarfile",
@@ -78,8 +86,7 @@ def _retrieve_setuptools_info():
             "zipp",
         )
 
-        # Resolve path(s) of `setuptools_vendor` package
-        setuptools_vendor = importlib.import_module("setuptools._vendor")
+        # Resolve path(s) of `setuptools_vendor` package.
         setuptools_vendor_paths = [pathlib.Path(path).resolve() for path in setuptools_vendor.__path__]
 
         # Process each candidate
@@ -102,38 +109,40 @@ def _retrieve_setuptools_info():
 
     # Collect submodules from `setuptools._vendor`, regardless of whether the vendored package is exposed or
     # not (because setuptools might need/use it either way).
-    EXCLUDED_VENDORED_MODULES = (
-        # Prevent recursing into setuptools._vendor.pyparsing.diagram, which typically fails to be imported due
-        # to missing dependencies (railroad, pyparsing (?), jinja2) and generates a warning... As the module is
-        # usually unimportable, it is likely not to be used by setuptools. NOTE: pyparsing was removed from
-        # vendored packages in setuptools v67.0.0; keep this exclude around for earlier versions.
-        'setuptools._vendor.pyparsing.diagram',
-        # Setuptools >= 71 started shipping vendored dependencies that include tests; avoid collecting those via
-        # hidden imports. (Note that this also prevents creation of aliases for these module, but that should
-        # not be an issue, as they should not be referenced from anywhere).
-        'setuptools._vendor.importlib_resources.tests',
-        # These appear to be utility scripts bundled with the jaraco.text package - exclude them.
-        'setuptools._vendor.jaraco.text.show-newlines',
-        'setuptools._vendor.jaraco.text.strip-prefix',
-        'setuptools._vendor.jaraco.text.to-dvorak',
-        'setuptools._vendor.jaraco.text.to-qwerty',
-    )
-    vendored_modules = collect_submodules(
-        'setuptools._vendor',
-        filter=lambda name: name not in EXCLUDED_VENDORED_MODULES,
-    )
+    vendored_modules = []
+    if setuptools_vendor is not None:
+        EXCLUDED_VENDORED_MODULES = (
+            # Prevent recursing into setuptools._vendor.pyparsing.diagram, which typically fails to be imported due
+            # to missing dependencies (railroad, pyparsing (?), jinja2) and generates a warning... As the module is
+            # usually unimportable, it is likely not to be used by setuptools. NOTE: pyparsing was removed from
+            # vendored packages in setuptools v67.0.0; keep this exclude around for earlier versions.
+            'setuptools._vendor.pyparsing.diagram',
+            # Setuptools >= 71 started shipping vendored dependencies that include tests; avoid collecting those via
+            # hidden imports. (Note that this also prevents creation of aliases for these module, but that should
+            # not be an issue, as they should not be referenced from anywhere).
+            'setuptools._vendor.importlib_resources.tests',
+            # These appear to be utility scripts bundled with the jaraco.text package - exclude them.
+            'setuptools._vendor.jaraco.text.show-newlines',
+            'setuptools._vendor.jaraco.text.strip-prefix',
+            'setuptools._vendor.jaraco.text.to-dvorak',
+            'setuptools._vendor.jaraco.text.to-qwerty',
+        )
+        vendored_modules += collect_submodules(
+            'setuptools._vendor',
+            filter=lambda name: name not in EXCLUDED_VENDORED_MODULES,
+        )
 
-    # `collect_submodules` (and its underlying `pkgutil.iter_modules` do not discover namespace sub-packages, in
-    # this case `setuptools._vendor.jaraco`. So force a manual scan of modules/packages inside it.
-    vendored_modules += collect_submodules(
-        'setuptools._vendor.jaraco',
-        filter=lambda name: name not in EXCLUDED_VENDORED_MODULES,
-    )
+        # `collect_submodules` (and its underlying `pkgutil.iter_modules` do not discover namespace sub-packages, in
+        # this case `setuptools._vendor.jaraco`. So force a manual scan of modules/packages inside it.
+        vendored_modules += collect_submodules(
+            'setuptools._vendor.jaraco',
+            filter=lambda name: name not in EXCLUDED_VENDORED_MODULES,
+        )
 
     # *** Data files for vendored packages ***
     vendored_data = []
 
-    if version >= (71, 0):
+    if version >= (71, 0) and setuptools_vendor is not None:
         # Since the vendored dependencies from `setuptools/_vendor` are now visible to the outside world, make
         # sure we collect their metadata. (We cannot use copy_metadata here, because we need to collect data
         # files to their original locations).
